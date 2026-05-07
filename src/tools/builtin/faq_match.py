@@ -33,6 +33,8 @@ class FAQMatchTool:
     description = "高精度FAQ匹配，无需LLM，毫秒级响应"
     params_schema = {"query": {"type": "string", "required": True, "description": "用户问题文本"}}
 
+    # FIXME: threshold 设太低容易误匹配(比如只命中一个无关关键词),
+    # 设太高又召回不够。0.4 是试了20条测试问题后折中的，后面用 Ragas 系统评估一下
     async def execute(self, query: str, threshold: float = 0.4, **kwargs) -> str | None:
         """关键词匹配 FAQ"""
         query_lower = query.lower()
