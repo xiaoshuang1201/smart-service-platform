@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  # ─── FastAPI 后端 ──────────────────────
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@db:5432/smartservice
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@db:5432/smartservice
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - chromadb_data:/app/data/chromadb
+      - knowledge_data:/app/data/knowledge_base
+    restart: unless-stopped
+
+  # ─── Streamlit UI ──────────────────────
+  ui:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    command: streamlit run scripts/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ─── PostgreSQL ────────────────────────
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: smartservice
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ─── Redis ─────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  chromadb_data:
+  knowledge_data:
