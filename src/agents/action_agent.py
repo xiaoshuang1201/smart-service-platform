@@ -91,6 +91,8 @@ class ActionAgent(BaseAgent):
         ]
 
         content, _ = await self._call_llm(messages, temperature=0.05)
+        # FIXME: LLM 有时候返回 ```json ... ``` 包裹的内容，有时候直接裸 JSON,
+        # 这里暴力处理一下，不够优雅但能用。后面考虑用 response_format 参数强制 JSON 模式
         try:
             if "```" in content:
                 content = content.split("```")[1]

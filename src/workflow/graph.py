@@ -1,4 +1,11 @@
 # LangGraph 编排器 — 多 Agent 协同的状态图
+#
+# 花了一下午才理清这个状态图，核心问题是:
+#   1. 什么时候走 RAG、什么时候调工具、什么时候转人工？
+#   2. 置信度阈值设多少？(先拍脑袋设 0.7，后面有标注数据再调)
+#   3. 记忆怎么在节点间传递？LangGraph 的 State 机制挺好用，但要注意 key 不能冲突
+#
+# 参考了 LangGraph 官方的 supervisor agent 例子，改成了适合自己的场景
 
 from __future__ import annotations
 import time

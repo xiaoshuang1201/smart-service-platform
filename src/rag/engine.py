@@ -1,4 +1,9 @@
 # RAG 引擎 — 文档加载、分块、向量化存储、混合检索
+#
+# 踩过的坑:
+#   - ChromaDB 路径含中文直接挂，持久化目录必须全英文
+#   - BM25 权重 0.3 是自己调的，没有做系统消融实验，后面要补
+#   - text-embedding-v3 的 batch 设太大阿里云会限流，现在 batch_size=20 是试出来的安全值
 
 from __future__ import annotations
 import asyncio

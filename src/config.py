@@ -1,5 +1,13 @@
 # SmartService Platform — 配置中心
-# 所有配置通过环境变量注入，支持 .env 文件
+#
+# 设计原则: 所有可变参数都通过环境变量注入，不硬编码
+# 调试的时候把 DEBUG=true 设上，LLM 调用会打日志
+#
+# 几个关键参数说明 (都是凭经验设的，没做系统调优):
+#   - temperature=0.1: Agent 场景要稳定输出，不能太放飞
+#   - chunk_size=800, overlap=150: 试了几组值，这组对中文文档效果最好
+#   - bm25_weight=0.3: 混合检索中 BM25 的权重，拍脑袋的，后面要跑消融实验
+#   - confidence_threshold=0.7: 低于这个分就转人工，还没用真实数据标定过
 
 import os
 from dataclasses import dataclass, field

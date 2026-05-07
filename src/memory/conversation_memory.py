@@ -1,4 +1,10 @@
 # 对话记忆管理 — 会话内上下文 + 超长对话自动压缩
+#
+# 当前实现比较简陋:
+#   - _compress() 只是拼历史消息截断，正经做法应该用 LLM 做摘要
+#   - 存内存里，服务重启全丢，生产环境得接 Redis
+#   - window_size 和 summary_threshold 这两个参数拍脑袋设的
+# TODO: 摘要压缩换成 LLM 来做，内存存储换成 Redis
 
 from __future__ import annotations
 from typing import Any
