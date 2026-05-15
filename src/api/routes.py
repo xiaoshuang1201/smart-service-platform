@@ -11,9 +11,16 @@ from fastapi.responses import StreamingResponse
 
 from src.workflow.graph import run_orchestrator
 from src.rag.engine import chunk_documents, embedding_service, vector_store, hybrid_retriever
-from src.models.schemas import ChatRequest, KnowledgeHealth, DocumentInfo
+from src.models.schemas import ChatRequest, KnowledgeHealth, DocumentInfo, ChatEvent
 from src.config import config
+from src.security.guard import InputGuard
+from src.observability import logger, set_trace_id
+from src.observability.metrics import (
+    chat_request_total, chat_request_duration_seconds,
+)
 
+router = APIRouter(prefix="/api/v1")
+_input_guard = InputGuard()
 router = APIRouter(prefix="/api/v1")
 
 
@@ -33,21 +40,26 @@ async def chat_send(
     api_key: str = Depends(verify_api_key),
 ):
     """发送消息 — SSE 流式返回 Agent 处理过程和最终结果"""
+    check = _input_guard.check(req.message, req.user_id)
+    if not check.allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=check.reason)
+
     async def event_stream():
         try:
             result = await run_orchestrator(
-                user_message=req.message,
+                user_message=check.sanitized,
                 session_id=req.conversation_id,
                 user_id=req.user_id,
             )
-        except Exception as e:
+        except Exception:
+            logger.exception("Chat SSE pipeline failed")
             yield _sse_event("error", {"message": "系统处理异常，请稍后重试"}, "error")
             yield _sse_event("done", {"should_escalate": True}, "error")
             return
 
         trace_id = result["trace_id"]
+        set_trace_id(trace_id)
 
-        # 事件1: 意图识别结果
         if result.get("intent"):
             intent = result["intent"]
             yield _sse_event("intent", {
@@ -56,21 +68,18 @@ async def chat_send(
                 "confidence": intent.confidence,
             }, trace_id)
 
-        # 事件2: 工具调用（如果有）
         for tc in result.get("tool_calls", []):
             yield _sse_event("tool_call", {
                 "tool_name": tc.get("tool_name"),
                 "status": tc.get("status"),
             }, trace_id)
 
-        # 事件3: 最终回复（异步分块流式输出）
         response_text = result["response"]
         for i in range(0, len(response_text), 8):
             chunk = response_text[i:i+8]
             yield _sse_event("token", {"text": chunk}, trace_id)
             await asyncio.sleep(0.01)
 
-        # 事件4: 完成
         yield _sse_event("done", {
             "session_id": result["session_id"],
             "confidence": result["confidence"],
@@ -95,12 +104,14 @@ async def chat_send_sync(
     api_key: str = Depends(verify_api_key),
 ):
     """同步接口 — 一次性返回完整结果"""
-    result = await run_orchestrator(
-        user_message=req.message,
+    check = _input_guard.check(req.message, req.user_id)
+    if not check.allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=check.reason)
+    return await run_orchestrator(
+        user_message=check.sanitized,
         session_id=req.conversation_id,
         user_id=req.user_id,
     )
-    return result
 
 
 # ─── 知识库接口 ────────────────────────────────────────

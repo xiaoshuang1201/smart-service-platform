@@ -1,0 +1,52 @@
+groups:
+  - name: smartservice
+    rules:
+      - alert: HighErrorRate
+        expr: rate(smartservice_chat_request_total{status="error"}[5m]) / rate(smartservice_chat_request_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High error rate (>5%)"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(smartservice_chat_request_duration_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "P95 latency > 10s"
+          description: "P95 latency is {{ $value }}s"
+
+      - alert: LLMCallFailures
+        expr: rate(smartservice_llm_call_duration_seconds_count{error="true"}[5m]) / rate(smartservice_llm_call_duration_seconds_count[5m]) > 0.1
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM call failure rate > 10%"
+
+      - alert: CircuitBreakerOpen
+        expr: smartservice_circuit_breaker_state > 1.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker open for {{ $labels.adapter_name }}"
+
+      - alert: PodRestarting
+        expr: rate(kube_pod_container_status_restarts_total{namespace="smartservice"}[10m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} is restarting"
+
+      - alert: HighInputGuardBlockRate
+        expr: rate(smartservice_input_guard_blocks_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High rate of blocked inputs (possible attack)"

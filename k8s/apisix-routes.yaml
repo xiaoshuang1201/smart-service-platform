@@ -1,0 +1,49 @@
+apiVersion: apisix.apache.org/v2
+kind: ApisixRoute
+metadata:
+  name: smartservice-api-routes
+  namespace: smartservice
+spec:
+  http:
+    - name: api
+      match:
+        hosts:
+          - api.smartservice.example.com
+        paths:
+          - /*
+      backends:
+        - serviceName: smartservice-api
+          servicePort: 8000
+      plugins:
+        - name: limit-req
+          enable: true
+          config:
+            rate: 60
+            burst: 20
+            key_type: var
+            key: http_x_api_key
+            rejected_code: 429
+        - name: api-breaker
+          enable: true
+          config:
+            break_response_code: 503
+            max_breaker_sec: 60
+            unhealthy:
+              http_statuses: [500, 502, 503]
+              failures: 3
+            healthy:
+              http_statuses: [200]
+              successes: 3
+        - name: cors
+          enable: true
+        - name: prometheus
+          enable: true
+    - name: ui
+      match:
+        hosts:
+          - ui.smartservice.example.com
+        paths:
+          - /*
+      backends:
+        - serviceName: smartservice-ui
+          servicePort: 8501

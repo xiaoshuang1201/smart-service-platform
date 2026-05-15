@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartservice-worker
+  namespace: smartservice
+  labels:
+    app: smartservice-worker
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: smartservice-worker
+  template:
+    metadata:
+      labels:
+        app: smartservice-worker
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: ghcr.io/xiaoshuang1201/smartservice-api:latest
+          imagePullPolicy: Always
+          command: ["python", "-m", "src.queue.consumer"]
+          env:
+            - name: DASHSCOPE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smartservice-secrets
+                  key: dashscope-api-key
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smartservice-secrets
+                  key: api-key
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: smartservice-secrets
+                  key: postgres-password
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: smartservice-secrets
+                  key: redis-password
+          envFrom:
+            - configMapRef:
+                name: smartservice-config
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 4Gi
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from celery import Celery; app = Celery(broker='redis://redis.smartservice:6379/1'); app.control.ping(timeout=5)"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "from celery import Celery; app = Celery(broker='redis://redis.smartservice:6379/1'); app.control.ping(timeout=5)"
+            initialDelaySeconds: 10
+            periodSeconds: 10

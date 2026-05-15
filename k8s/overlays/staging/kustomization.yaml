@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: smartservice
+resources:
+  - ../../base
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: smartservice-api
+      spec:
+        replicas: 1
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: smartservice-worker
+      spec:
+        replicas: 1
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: smartservice-ui
+      spec:
+        replicas: 1
+  - patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: smartservice-ingress
+      spec:
+        tls:
+          - hosts:
+              - api.staging.smartservice.example.com
+              - ui.staging.smartservice.example.com
+        rules:
+          - host: api.staging.smartservice.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: smartservice-api
+                      port:
+                        number: 8000
+          - host: ui.staging.smartservice.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: smartservice-ui
+                      port:
+                        number: 8501

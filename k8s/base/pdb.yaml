@@ -1,0 +1,21 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: smartservice-api-pdb
+  namespace: smartservice
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: smartservice-api
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: smartservice-worker-pdb
+  namespace: smartservice
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: smartservice-worker

@@ -1,0 +1,43 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: smartservice-ingress
+  namespace: smartservice
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+  labels:
+    app: smartservice
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.smartservice.example.com
+        - ui.smartservice.example.com
+      secretName: smartservice-tls
+  rules:
+    - host: api.smartservice.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: smartservice-api
+                port:
+                  number: 8000
+    - host: ui.smartservice.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: smartservice-ui
+                port:
+                  number: 8501

@@ -1,0 +1,74 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: smartservice
+resources:
+  - ../../base
+patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: smartservice-api
+      spec:
+        replicas: 3
+        template:
+          spec:
+            containers:
+              - name: api
+                resources:
+                  requests:
+                    cpu: 1000m
+                    memory: 1Gi
+                  limits:
+                    cpu: 3000m
+                    memory: 4Gi
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: smartservice-worker
+      spec:
+        replicas: 3
+  - patch: |-
+      apiVersion: autoscaling/v2
+      kind: HorizontalPodAutoscaler
+      metadata:
+        name: smartservice-api-hpa
+      spec:
+        minReplicas: 3
+        maxReplicas: 20
+  - patch: |-
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: smartservice-ingress
+        annotations:
+          cert-manager.io/cluster-issuer: "letsencrypt-prod"
+          nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      spec:
+        tls:
+          - hosts:
+              - api.smartservice.prod.example.com
+              - ui.smartservice.prod.example.com
+            secretName: smartservice-tls
+        rules:
+          - host: api.smartservice.prod.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: smartservice-api
+                      port:
+                        number: 8000
+          - host: ui.smartservice.prod.example.com
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: smartservice-ui
+                      port:
+                        number: 8501

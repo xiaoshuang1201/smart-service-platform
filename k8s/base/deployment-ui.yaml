@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: smartservice-ui
+  namespace: smartservice
+  labels:
+    app: smartservice-ui
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: smartservice-ui
+  template:
+    metadata:
+      labels:
+        app: smartservice-ui
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: ui
+          image: ghcr.io/xiaoshuang1201/smartservice-ui:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8501
+              name: http
+          env:
+            - name: API_BASE
+              value: "http://smartservice-api:8000/api/v1"
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smartservice-secrets
+                  key: api-key
+          envFrom:
+            - configMapRef:
+                name: smartservice-config
+          resources:
+            requests:
+              cpu: 200m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8501
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            tcpSocket:
+              port: 8501
+            initialDelaySeconds: 5
+            periodSeconds: 5

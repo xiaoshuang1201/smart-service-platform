@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: smartservice
+  labels:
+    app.kubernetes.io/name: smartservice
+    app.kubernetes.io/part-of: smartservice-platform

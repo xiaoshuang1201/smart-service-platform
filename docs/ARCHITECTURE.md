@@ -1,275 +1,170 @@
-# SmartService — 系统架构设计文档
+# SmartService v2.0 — Enterprise Architecture
 
-| 文档信息 | |
-|---------|------|
-| 版本 | v1.0 |
-| 日期 | 2026-05-07 |
+| 属性 | 值 |
+|------|-----|
+| 版本 | v2.0 Enterprise |
+| 更新日期 | 2026-05-15 |
 
 ---
 
 ## 1. 架构总览
 
 ```
-                          ┌─────────────────────────┐
-                          │     Streamlit UI         │
-                          │   (Chat Interface)       │
-                          └───────────┬─────────────┘
-                                      │ HTTP/SSE
-                          ┌───────────▼─────────────┐
-                          │    FastAPI Gateway       │
-                          │  /api/v1/chat           │
-                          │  /api/v1/knowledge      │
-                          │  /api/v1/admin          │
-                          └───────────┬─────────────┘
-                                      │
-                    ┌─────────────────┼─────────────────┐
-                    │                 │                 │
-          ┌─────────▼──────┐ ┌───────▼───────┐ ┌───────▼───────┐
-          │  Orchestrator  │ │   Memory      │ │  Monitoring   │
-          │  (LangGraph)   │ │   Manager     │ │  (LangSmith)  │
-          └─────────┬──────┘ └───────────────┘ └───────────────┘
-                    │
-      ┌─────────────┼─────────────┐
-      │             │             │
-┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-│ Intent    │ │ Knowledge │ │ Action    │
-│ Agent     │ │ Agent     │ │ Agent     │
-│           │ │ (RAG)     │ │ (Tools)   │
-└───────────┘ └─────┬─────┘ └─────┬─────┘
-                    │             │
-              ┌─────▼─────┐ ┌─────▼─────┐
-              │ ChromaDB  │ │ Tool      │
-              │ (Vector)  │ │ Registry  │
-              └───────────┘ └─────┬─────┘
-                                  │
-                    ┌─────────────┼─────────────┐
-                    │             │             │
-              ┌─────▼─────┐ ┌─────▼─────┐ ┌─────▼─────┐
-              │ Order API │ │ CRM  API  │ │ FAQ Match │
-              │ (Mock)    │ │ (Mock)    │ │ (Local)   │
-              └───────────┘ └───────────┘ └───────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Ingress (TLS 1.3)                         │
+│              nginx-ingress / APISIX (auth / rate-limit / WAF)    │
+└──────────────────────────────┬──────────────────────────────────┘
+                               │
+    ┌──────────────────────────┼──────────────────────────────┐
+    │                          │                              │
+    ▼                          ▼                              ▼
+┌──────────┐          ┌──────────────┐              ┌──────────────┐
+│Streamlit │          │  FastAPI     │              │  Celery      │
+│  UI Pod  │          │  API Pods    │              │  Worker Pods │
+│ (x2)     │───────→  │  (x3→10 HPA) │              │  (x2→8 HPA)  │
+└──────────┘          └──────┬───────┘              └──────┬───────┘
+                             │                             │
+          ┌──────────────────┼───────────────┐             │
+          │                  │               │             │
+          ▼                  ▼               ▼             │
+┌──────────────┐  ┌──────────────┐  ┌──────────────┐      │
+│   Qdrant     │  │  PostgreSQL  │  │ Redis Cluster│◄─────┘
+│ (gRPC, 6334) │  │  (主从)      │  │ (Sentinel)   │
+│ Vector Store │  │ 会话/消息/用户│  │ 状态+队列    │
+└──────────────┘  └──────────────┘  └──────────────┘
+                                                  │
+          ┌───────────────────────┐               │
+          │       MinIO/S3        │               │
+          │  (文档存储, Bucket)    │               │
+          └───────────────────────┘               │
+                                                  │
+          ┌───────────────────────┐               │
+          │  Observability Stack  │◄──────────────┘
+          │ OTel → Prom → Grafana │
+          │ (metrics / traces)    │
+          └───────────────────────┘
 ```
 
----
+## 2. 技术栈 (v2.0)
 
-## 2. 技术选型
+| 层级 | v1.0 | v2.0 Enterprise | 变更说明 |
+|------|------|-----------------|----------|
+| Agent 框架 | LangGraph | LangGraph + PostgresSaver | 状态可恢复 |
+| LLM | Qwen-Max | Qwen-Max | 不变 |
+| 向量数据库 | ChromaDB (embedded) | Qdrant (distributed, gRPC) | 高可用共享存储 |
+| 嵌入模型 | text-embedding-v3 | text-embedding-v3 | 不变 |
+| 后端 | FastAPI | FastAPI + Gunicorn/Uvicorn Workers | 多 worker 生产化 |
+| 前端 | Streamlit | Streamlit (K8s Deployment) | 多副本 |
+| 数据库 | - (配置未使用) | PostgreSQL 16 (主从) | ORM 持久化 |
+| 缓存/状态 | In-memory dict | Redis (Sentinel/Cluster) | 分布式状态 |
+| 文档存储 | 本地目录 | MinIO (S3-compatible) | 对象存储 |
+| 异步任务 | - | Celery + Redis | 知识库索引/日志处理 |
+| 容器化 | Docker Compose | Kubernetes (k8s/) | 一键部署 |
+| 网关 | - | APISIX / nginx-ingress | 认证/限流/WAF |
+| 日志 | print + logging | loguru (JSON structured) | 结构化日志 |
+| 追踪 | - | OpenTelemetry (OTLP) | 全链路追踪 |
+| 指标 | - | Prometheus + Grafana | 可观测性 |
+| 告警 | - | AlertManager rules | P99延迟/错误率 |
+| 安全 | API Key | API Key + PII脱敏 + 输入守卫 + NetworkPolicy + TLS | 纵深防御 |
+| CI/CD | - | GitHub Actions | PR测试 + 自动部署 |
+| 测试 | pytest (3文件) | pytest (15+文件) + k6 | 单元/集成/负载 |
 
-| 层 | 技术 | 选型理由 |
-|----|------|----------|
-| **Agent 框架** | LangChain + LangGraph | Agent 编排事实标准，状态图灵活，社区活跃 |
-| **LLM** | Qwen-Max (DashScope API) | 中文能力强，价格适中，兼容 OpenAI SDK |
-| **向量数据库** | ChromaDB | 轻量级，Python原生，零配置启动 |
-| **Embedding** | text-embedding-v3 (DashScope) | 1024维，中文检索效果 SOTA |
-| **后端框架** | FastAPI | 异步原生，SSE 流式支持，自动 OpenAPI 文档 |
-| **前端** | Streamlit | 快速原型，Python 生态，适合演示 |
-| **数据库** | PostgreSQL | 会话记录、知识库元数据持久化 |
-| **缓存** | Redis | 会话状态缓存、FAQ 高频问题缓存 |
-| **容器化** | Docker Compose | 一键启动 6 个服务 |
-| **可观测** | LangSmith (可选) | Agent 调用链可视化追踪 |
-
----
-
-## 3. 核心流程
-
-### 3.1 一次完整对话流程
-
-```
-用户输入 "我的订单 20260507001 什么时候到货？"
-  │
-  ▼
-┌──────────────┐
-│ 1. 网关接收   │  FastAPI 验证 API Key, 生成 trace_id
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ 2. 意图识别   │  IntentAgent →
-│              │  intent = "order_query"
-│              │  entities = {order_id: "20260507001"}
-│              │  sentiment = "neutral"
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ 3. 路由分发   │  Orchestrator 根据 intent 决定走 ActionAgent
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ 4. 工具调用   │  ActionAgent 识别→调用 order_query(order_id)
-│              │  返回: {status:"运输中", eta:"2026-05-09"}
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ 5. 结果封装   │  LLM 将工具返回的结构化数据转为自然语言
-│              │  "您的订单 20260507001 当前在运输中，预计5月9日送达"
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ 6. 记忆保存   │  将本轮对话 append 到 session memory
-└──────┬───────┘
-       │
-       ▼
-  返回给用户 (SSE 流式)
-```
-
-### 3.2 LangGraph 状态图
-
-```python
-# 状态图定义
-START → intent_classify → route_by_intent
-                              │
-              ┌───────────────┼───────────────┐
-              ▼               ▼               ▼
-        knowledge_rag    action_tools    human_handoff
-              │               │               │
-              └───────────────┼───────────────┘
-                              ▼
-                       check_confidence
-                              │
-                    ┌─────────┴─────────┐
-                    ▼                   ▼
-              confidence > 0.7    confidence <= 0.7
-                    │                   │
-                    ▼                   ▼
-              format_output        human_escalation
-                    │                   │
-                    └─────────┬─────────┘
-                              ▼
-                           END
-```
-
----
-
-## 4. 数据库设计
-
-### 4.1 PostgreSQL 表结构
-
-```sql
--- 会话表
-CREATE TABLE conversations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id VARCHAR(128),
-    status VARCHAR(32) DEFAULT 'active',  -- active, closed, escalated
-    intent VARCHAR(64),
-    sentiment VARCHAR(32),
-    created_at TIMESTAMP DEFAULT now(),
-    updated_at TIMESTAMP DEFAULT now(),
-    metadata JSONB DEFAULT '{}'
-);
-
--- 消息表
-CREATE TABLE messages (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID REFERENCES conversations(id),
-    role VARCHAR(32) NOT NULL,  -- user, assistant, system, tool
-    content TEXT NOT NULL,
-    trace JSONB DEFAULT '{}',   -- Agent 调用链信息
-    token_count INT DEFAULT 0,
-    latency_ms INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT now()
-);
-
--- 知识库文档元数据表
-CREATE TABLE documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    filename VARCHAR(256) NOT NULL,
-    file_type VARCHAR(32),
-    chunk_count INT DEFAULT 0,
-    status VARCHAR(32) DEFAULT 'pending',  -- pending, indexing, ready, failed
-    created_at TIMESTAMP DEFAULT now()
-);
-
--- 工具调用记录表 (用于审计和成本分析)
-CREATE TABLE tool_calls (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    conversation_id UUID REFERENCES conversations(id),
-    message_id UUID REFERENCES messages(id),
-    tool_name VARCHAR(128) NOT NULL,
-    input_params JSONB DEFAULT '{}',
-    output_result JSONB DEFAULT '{}',
-    status VARCHAR(32),  -- success, failed, timeout
-    latency_ms INT DEFAULT 0,
-    created_at TIMESTAMP DEFAULT now()
-);
-```
-
-### 4.2 ChromaDB Collection 设计
+## 3. 数据流
 
 ```
-collection: knowledge_base
-  metadata: { doc_id, chunk_index, filename, section_title }
-  embedding: 1024-dim (text-embedding-v3)
+┌────────────────────────────────────────────────────────────────────┐
+│                        同步请求路径                                  │
+│                                                                    │
+│ User → Ingress(TLS) → APISIX(限流/认证) → FastAPI → InputGuard     │
+│   → IntentAgent → [KnowledgeAgent (Qdrant) | ActionAgent (OMS/CRM)]│
+│   → CheckConfidence → Response (SSE)                               │
+│   → Memory (Redis) + DB (PostgreSQL async)                         │
+└────────────────────────────────────────────────────────────────────┘
 
-collection: faq_cache
-  metadata: { question, answer, category, access_count }
-  embedding: 1024-dim
+┌────────────────────────────────────────────────────────────────────┐
+│                        异步任务路径                                  │
+│                                                                    │
+│ Upload API → MinIO (存储文档) → Celery Worker                       │
+│   → chunk + embed → Qdrant (索引) → PostgreSQL (metadata update)    │
+│                                                                    │
+│ Chat Complete → Celery Task → PostgreSQL (消息持久化)               │
+│                                                                    │
+│ Cron: cleanup_expired_sessions (清理过期 Redis 会话)                │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
----
+## 4. 核心组件
 
-## 5. API 设计 (RESTful)
+### 4.1 Agent 编排 (src/workflow/graph.py)
+- LangGraph StateGraph → PostgresSaver 持久化检查点
+- 5个节点: intent_classify → route_by_intent → knowledge_rag/action_tools/human_handoff → check_confidence → 输出
 
-### 5.1 对话接口
+### 4.2 向量存储 (src/vector_store/)
+- `BaseVectorStore` 抽象接口
+- `QdrantVectorStore`: gRPC通信, HNSW索引, Scalar量化
+- `VectorStore` ChromaDB 包装 (向后兼容)
 
-```
-POST   /api/v1/chat/send          # 发送消息 (SSE 流式返回)
-  Body: { conversation_id?, message, user_id? }
-  Response: SSE stream
+### 4.3 业务适配器 (src/business/)
+- `OMSAdapter`: 订单系统 (mock/custom HTTP + retry + circuit breaker)
+- `CRMAdapter`: 会员系统 (mock/custom HTTP + phone hashing + PII masking)
+- `resilience.py`: tenacity retry + pybreaker circuit breaker + timeout + fallback
 
-GET    /api/v1/chat/{conv_id}/history  # 获取会话历史
-DELETE /api/v1/chat/{conv_id}          # 结束会话
-```
+### 4.4 安全模块 (src/security/)
+- `InputGuard`: 提示注入检测 (10+ patterns) + 零宽字符 + Unicode同形字
+- `PIIMasker`: 手机号/邮箱/身份证/银行卡脱敏
+- `RateLimitMiddleware`: Redis滑动窗口 (含内存兜底)
 
-### 5.2 知识库管理接口
+### 4.5 可观测性 (src/observability/)
+- `logging.py`: loguru JSON格式 + trace_id注入
+- `tracing.py`: OpenTelemetry (OTLP gRPC export, FastAPI auto-instrument)
+- `metrics.py`: Prometheus 指标 (请求数/延迟/Token/工具调用/熔断/活跃会话)
 
-```
-POST   /api/v1/knowledge/upload       # 上传文档 (multipart/form-data)
-GET    /api/v1/knowledge/documents    # 文档列表
-DELETE /api/v1/knowledge/documents/{id}  # 删除文档
-POST   /api/v1/knowledge/reindex      # 重建索引
-GET    /api/v1/knowledge/health       # 知识库健康检查
-```
+## 5. Kubernetes 部署
 
-### 5.3 管理接口
-
-```
-GET    /api/v1/admin/dashboard        # 运营数据看板
-GET    /api/v1/admin/tool-calls       # 工具调用日志
-GET    /api/v1/admin/token-usage      # Token 消耗统计
-```
-
----
-
-## 6. 部署架构 (Docker Compose)
-
-```
-┌─────────────────────────────────────────────────┐
-│                  Docker Network                    │
-│                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
-│  │ FastAPI  │  │ Streamlit│  │  PostgreSQL  │   │
-│  │ :8000    │  │ :8501    │  │  :5432       │   │
-│  └──────────┘  └──────────┘  └──────────────┘   │
-│                                                   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────┐   │
-│  │ ChromaDB │  │  Redis   │  │  Celery      │   │
-│  │ :8001    │  │ :6379    │  │  Worker      │   │
-│  └──────────┘  └──────────┘  └──────────────┘   │
-│                                                   │
-└─────────────────────────────────────────────────┘
+```bash
+kubectl apply -k k8s/overlays/production/
 ```
 
----
+| 资源 | 副本数 | HPA | 说明 |
+|------|--------|-----|------|
+| smartservice-api | 3→20 | CPU 70% | FastAPI 后端 |
+| smartservice-worker | 2→8 | CPU 70% | Celery 异步任务 |
+| smartservice-ui | 2 | - | Streamlit 前端 |
 
-## 7. 安全设计
+所有 Pod 配置了 `livenessProbe`, `readinessProbe`, `securityContext (non-root)`, `resource limits/requests`, `NetworkPolicy`。
+
+## 6. PostgreSQL 数据模型
+
+- `users` (external_id, phone_hashed, email_hashed)
+- `conversations` (user_id FK, status, intent, sentiment, metadata JSONB)
+- `messages` (conversation_id FK, role, content, trace JSONB, token_count, latency_ms)
+- `documents` (filename, file_type, minio_path, status, chunk_count)
+- `tool_calls` (message_id FK, tool_name, input_params/output_result JSONB, status, latency_ms)
+
+## 7. API 端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/v1/chat/send` | SSE 流式对话 |
+| POST | `/api/v1/chat/send-sync` | 同步对话 |
+| POST | `/api/v1/knowledge/upload` | 上传文档 (→MinIO + Celery) |
+| GET  | `/api/v1/knowledge/health` | 知识库健康检查 |
+| GET  | `/api/v1/admin/health` | 服务健康 |
+| GET  | `/api/v1/admin/stats` | 运营统计 |
+| GET  | `/metrics` | Prometheus 指标 |
+| GET  | `/healthz` | K8s liveness probe |
+| GET  | `/readyz` | K8s readiness probe |
+
+## 8. 安全架构
 
 | 层面 | 措施 |
 |------|------|
-| **传输** | API Key Header 验证 |
-| **数据** | 手机号/邮箱脱敏（`138****1234`） |
-| **LLM** | Prompt 注入防护（对用户输入做语义清洗，拒绝"忽略之前的指令"类注入） |
-| **审计** | 所有 Agent 决策和工具调用写入不可篡改日志 |
-| **速率** | Redis 实现用户级 Rate Limiting（单用户 20 req/min） |
+| 传输 | TLS 1.3 (Ingress + cert-manager) |
+| API | API Key Header 验证 |
+| 网络 | K8s NetworkPolicy (最小权限通信) |
+| 数据 | PIIMasker (手机/邮箱/身份证/银行卡脱敏) |
+| 输入 | InputGuard (提示注入 + 零宽字符 + 同形字检测) |
+| 速率 | Redis 滑动窗口限流 (60 req/min) |
+| 审计 | 工具调用/Trace 写入 PostgreSQL 不可篡改 |
+| 密钥 | K8s Secrets + External Secrets Operator (生产) |
+| CI    | pip-audit + bandit + trivy 容器扫描 |
