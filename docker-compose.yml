@@ -24,12 +24,13 @@ services:
 
   # ─── Streamlit UI ──────────────────────
   ui:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
     ports:
       - "8501:8501"
     env_file:
       - .env
-    command: streamlit run scripts/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
     depends_on:
       - api
     restart: unless-stopped

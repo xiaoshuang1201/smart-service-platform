@@ -10,6 +10,7 @@
 from __future__ import annotations
 import time
 import uuid
+import logging
 from typing import Any, TypedDict, Literal
 
 from langgraph.graph import StateGraph, END
@@ -104,7 +105,7 @@ def route_by_intent(state: AgentState) -> Literal["knowledge_rag", "action_tools
     if not intent:
         return "knowledge_rag"
 
-    intent_name = intent.intent if hasattr(intent, 'intent') else intent.get("intent", "knowledge_qa")
+    intent_name = intent.intent
 
     if intent_name == "human_handoff":
         return "human_handoff"
@@ -171,6 +172,9 @@ orchestrator = build_orchestrator()
 
 # ─── 对外调用入口 ────────────────────────────────────
 
+logger = logging.getLogger(__name__)
+
+
 async def run_orchestrator(
     user_message: str,
     session_id: str | None = None,
@@ -201,7 +205,22 @@ async def run_orchestrator(
 
     # 执行 LangGraph
     config_dict = {"configurable": {"thread_id": session_id}}
-    final_state = await orchestrator.ainvoke(initial_state, config_dict)
+    try:
+        final_state = await orchestrator.ainvoke(initial_state, config_dict)
+    except Exception as e:
+        logger.error(f"[Orchestrator] Pipeline failed for trace {trace_id}: {e}")
+        total_latency = (time.time() - initial_state["start_time"]) * 1000
+        return {
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "response": "抱歉，系统暂时遇到了一些问题，正在为您转接人工客服...",
+            "intent": None,
+            "confidence": 0.0,
+            "tool_calls": [],
+            "should_escalate": True,
+            "total_latency_ms": int(total_latency),
+            "total_tokens": 0,
+        }
 
     # 保存到对话记忆
     memory_manager.add_message(session_id, "user", user_message)

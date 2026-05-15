@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import config
 from src.api.routes import router
 from src.tools import register_all_tools
+from src.middleware import RateLimitMiddleware
 
 
 @asynccontextmanager
@@ -38,6 +39,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.add_middleware(RateLimitMiddleware)
 
 # 路由
 app.include_router(router)

@@ -91,6 +91,7 @@ class AppConfig:
     api_host: str = "0.0.0.0"
     api_port: int = 8000
     api_key_header: str = "X-API-Key"
+    api_key: str = field(default_factory=lambda: os.getenv("API_KEY", "sk-demo-key"))
     cors_origins: list = field(default_factory=lambda: ["*"])
 
     # Rate Limiting

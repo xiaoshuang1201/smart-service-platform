@@ -5,11 +5,12 @@ from httpx import AsyncClient, ASGITransport
 from unittest.mock import AsyncMock, patch
 
 from src.main import app
+from src.config import config
 
 
 @pytest.fixture
 def api_key_headers():
-    return {"X-API-Key": "sk-demo-key"}
+    return {"X-API-Key": config.api_key}
 
 
 class TestHealthEndpoint:
@@ -36,7 +37,7 @@ class TestChatEndpoint:
                     "message": "如何退货？",
                     "user_id": "test_user_001",
                 },
-                headers={"X-API-Key": "sk-demo-key"},
+                headers={"X-API-Key": config.api_key},
                 timeout=60,
             )
             assert resp.status_code == 200
@@ -64,7 +65,7 @@ class TestKnowledgeEndpoint:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.get(
                 "/api/v1/knowledge/health",
-                headers={"X-API-Key": "sk-demo-key"},
+                headers={"X-API-Key": config.api_key},
             )
             assert resp.status_code == 200
             data = resp.json()
@@ -84,11 +85,10 @@ class TestChatSSE:
                     "message": "查询订单20260507001",
                     "user_id": "test_user_002",
                 },
-                headers={"X-API-Key": "sk-demo-key"},
+                headers={"X-API-Key": config.api_key},
                 timeout=60,
             )
             assert resp.status_code == 200
-            # SSE响应应该是 text/event-stream
             assert "text/event-stream" in resp.headers.get("content-type", "")
 
             body = resp.text

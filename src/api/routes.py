@@ -1,13 +1,13 @@
 # FastAPI 路由 — 对话、知识库、管理接口
 
 from __future__ import annotations
+import asyncio
 import json
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header, UploadFile, File, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.workflow.graph import run_orchestrator
 from src.rag.engine import chunk_documents, embedding_service, vector_store, hybrid_retriever
@@ -20,9 +20,7 @@ router = APIRouter(prefix="/api/v1")
 # ─── 鉴权依赖 ────────────────────────────────────────
 
 async def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    # 简化版：生产环境需对接实际鉴权系统
-    valid_keys = {"sk-demo-key", config.llm.api_key}
-    if not x_api_key or x_api_key not in valid_keys:
+    if not x_api_key or x_api_key != config.api_key:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
     return x_api_key
 
@@ -36,20 +34,26 @@ async def chat_send(
 ):
     """发送消息 — SSE 流式返回 Agent 处理过程和最终结果"""
     async def event_stream():
-        result = await run_orchestrator(
-            user_message=req.message,
-            session_id=req.conversation_id,
-            user_id=req.user_id,
-        )
-        # 将结果拆分为多个 SSE 事件
+        try:
+            result = await run_orchestrator(
+                user_message=req.message,
+                session_id=req.conversation_id,
+                user_id=req.user_id,
+            )
+        except Exception as e:
+            yield _sse_event("error", {"message": "系统处理异常，请稍后重试"}, "error")
+            yield _sse_event("done", {"should_escalate": True}, "error")
+            return
+
         trace_id = result["trace_id"]
 
         # 事件1: 意图识别结果
         if result.get("intent"):
             intent = result["intent"]
             yield _sse_event("intent", {
-                "intent": intent.intent if hasattr(intent, 'intent') else str(intent),
-                "confidence": intent.confidence if hasattr(intent, 'confidence') else 0,
+                "intent": intent.intent,
+                "sentiment": intent.sentiment,
+                "confidence": intent.confidence,
             }, trace_id)
 
         # 事件2: 工具调用（如果有）
@@ -59,12 +63,12 @@ async def chat_send(
                 "status": tc.get("status"),
             }, trace_id)
 
-        # 事件3: 最终回复（模拟流式输出）
+        # 事件3: 最终回复（异步分块流式输出）
         response_text = result["response"]
-        chunk_size = 10  # 每次发送的字符数
-        for i in range(0, len(response_text), chunk_size):
-            chunk = response_text[i:i+chunk_size]
+        for i in range(0, len(response_text), 8):
+            chunk = response_text[i:i+8]
             yield _sse_event("token", {"text": chunk}, trace_id)
+            await asyncio.sleep(0.01)
 
         # 事件4: 完成
         yield _sse_event("done", {

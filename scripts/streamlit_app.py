@@ -5,10 +5,11 @@ import requests
 import json
 import time
 import uuid
+import os
 
 # ─── 配置 ────────────────────────────────────────────
-API_BASE = "http://localhost:8000/api/v1"
-API_KEY = "sk-demo-key"
+API_BASE = os.getenv("API_BASE", "http://localhost:8000/api/v1")
+API_KEY = os.getenv("API_KEY", "sk-demo-key")
 
 st.set_page_config(
     page_title="SmartService 智能客服",
